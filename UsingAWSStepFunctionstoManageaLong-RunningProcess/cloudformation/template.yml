@@ -1,0 +1,296 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  InputBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: InputBucketPermission
+    Properties:
+      BucketName: 
+        Fn::Join:
+        - ''
+        - - step-function-input-
+          - Fn::Select:
+            - 2
+            - Fn::Split:
+              - "/"
+              - Ref: AWS::StackId
+      NotificationConfiguration:
+        LambdaConfigurations:
+        - Event: s3:ObjectCreated:*
+          Function:
+            Fn::GetAtt:
+            - TriggerStepFunctionFunction
+            - Arn
+  InputBucketPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: TriggerStepFunctionFunction
+      Principal: s3.amazonaws.com
+      SourceAccount:
+        Ref: AWS::AccountId
+  ExecuteTranscribeJobRole:
+     Type: AWS::IAM::Role
+     Properties:
+      RoleName:
+        Fn::Join:
+        - ''
+        - - lab-role-lambda-
+          - Ref: AWS::Region
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+           Service:
+           - lambda.amazonaws.com
+          Action:
+            - sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: lab-policy-lambda
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+             - logs:*
+            Resource: arn:aws:logs:*:*:*
+          - Effect: Allow
+            Action:
+             - s3:*
+            Resource: "*"
+          - Effect: Allow
+            Action:
+             - transcribe:StartTranscriptionJob
+             - transcribe:GetTranscriptionJob
+            Resource: "*"
+  TriggerTranscribeFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: trigger-transcribe
+      Handler: index.lambda_handler
+      Role:
+         Fn::GetAtt:
+         - ExecuteTranscribeJobRole
+         - Arn
+      Code:
+         ZipFile:
+          Fn::Sub: |
+            import boto3
+            import uuid
+            import json
+            
+            def lambda_handler(event, context):
+            
+                print(json.dumps(event))
+            
+                s3bucket = event['Input']['Bucket']
+                s3object = event['Input']['Key']
+                
+                s3Path = "s3://" + s3bucket + "/" + s3object
+                jobName = s3object + '-' + str(uuid.uuid4())
+            
+                client = boto3.client('transcribe')
+            
+                response = client.start_transcription_job(
+                    TranscriptionJobName=jobName,
+                    LanguageCode='en-US',
+                    MediaFormat='mp4',
+                    Media={
+                        'MediaFileUri': s3Path
+                    }
+                )
+            
+                print(json.dumps(response, default=str))
+            
+                return {
+                    'TranscriptionJobName': response['TranscriptionJob']['TranscriptionJobName']
+                }
+      Runtime: python3.6
+      Timeout: 300
+  StepFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Join:
+        - ''
+        - - lab-role-step-functions-
+          - Ref: AWS::Region
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - states.amazonaws.com
+            Action:
+            - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
+      Path: "/"
+  StateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    DependsOn: StepFunctionExecutionRole
+    Properties: 
+      DefinitionString: !Sub |
+        {
+          "StartAt": "Transcribe",
+          "States": {
+            "Transcribe": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:trigger-transcribe:$LATEST",
+                "Payload": {
+                  "Input.$": "$"
+                }
+              },
+              "Next": "transcribe-wait"
+            },
+            "transcribe-wait":{
+                "Type":"Wait",
+                "Seconds":2,
+                "Next":"transcribe-status"
+            },
+            "transcribe-status": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:check-transcribe:$LATEST",
+                "Payload": {
+                  "Input.$": "$"
+                }
+              },
+              "Next": "transcribe-complete"
+            },
+            "transcribe-complete":{
+                "Type":"Choice",
+                "Choices":[
+                    {
+                        "Variable":"$.Payload.TranscriptionJobStatus",
+                        "StringEquals":"COMPLETED",
+                        "Next":"success"
+                    },
+                    {
+                        "Variable":"$.Payload.TranscriptionJobStatus",
+                        "StringEquals":"FAILED",
+                        "Next":"error"
+                    }
+                ],
+                "Default":"transcribe-wait"  
+            },
+            "success": {
+                "Type": "Pass",
+                "End": true
+            },
+            "error": {
+                "Type": "Pass",
+                "End": true
+            }
+          }
+        }
+      RoleArn: !GetAtt StepFunctionExecutionRole.Arn
+      StateMachineName: !Sub state-machine-${AWS::Region}
+  TriggerStepFunctionRole:
+    Type: AWS::IAM::Role
+    DependsOn: StateMachine
+    Properties:
+      RoleName:
+        Fn::Join:
+        - ''
+        - - lab-role-lambda-trigger-step-function-
+          - Ref: AWS::Region
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - lambda.amazonaws.com
+            Action:
+            - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSStepFunctionsFullAccess
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Path: "/"    
+  TriggerStepFunctionFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: TriggerStepFunctionRole
+    Properties:
+      FunctionName: trigger-step-functions
+      Handler: index.lambda_handler
+      Role:
+         Fn::GetAtt:
+         - TriggerStepFunctionRole
+         - Arn
+      Code:
+         ZipFile:
+          Fn::Sub: |
+            import boto3
+            import os
+            import json
+            
+            stepfunctions = boto3.client('stepfunctions')
+            
+            def lambda_handler(event, context):
+                
+                bucket = event['Records'][0]['s3']['bucket']['name']
+                key = event['Records'][0]['s3']['object']['key']
+                
+                input = {
+                    "Bucket" : bucket,
+                    "Key": key
+                }
+                
+                response = stepfunctions.start_execution(
+                    stateMachineArn=os.environ['STATEMACHINEARN'],
+                    input=json.dumps(input, default=str)
+                )
+                
+                return json.dumps(response, default=str)
+      Runtime: python3.6
+      Timeout: 300
+      Environment:
+        Variables:
+          STATEMACHINEARN : !Ref StateMachine
+  StatusCheckerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: check-transcribe
+      Handler: index.lambda_handler
+      Role:
+         Fn::GetAtt:
+         - ExecuteTranscribeJobRole
+         - Arn
+      Code:
+         ZipFile:
+          Fn::Sub: |
+            import boto3
+            
+            transcribe = boto3.client('transcribe')
+            
+            def lambda_handler(event, context):
+                
+                payload = event['Input']['Payload']
+                transcriptionJobName = payload['TranscriptionJobName']
+                
+                response = transcribe.get_transcription_job(
+                    TranscriptionJobName=transcriptionJobName
+                )
+                
+                transcriptionJob = response['TranscriptionJob']
+                
+                transcriptFileUri = "none"
+                if 'Transcript' in transcriptionJob:
+                    if 'TranscriptFileUri' in transcriptionJob['Transcript']:
+                        transcriptFileUri = transcriptionJob['Transcript']['TranscriptFileUri']
+                
+                return {
+                    'TranscriptFileUri': transcriptFileUri,
+                    'TranscriptionJobName': transcriptionJobName,
+                    'TranscriptionJobStatus': response['TranscriptionJob']['TranscriptionJobStatus']
+                }
+      Runtime: python3.6
+      Timeout: 300
+  
