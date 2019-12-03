@@ -1,10 +1,14 @@
 # aws-step-functions
 
-### References:
+### References
 https://medium.com/weareservian/aws-step-functions-the-power-of-simplicity-10e8395af4f3
 https://docs.aws.amazon.com/step-functions/latest/dg/concepts-activities.html
 https://medium.com/weareservian/serverless-data-processing-with-aws-step-functions-an-example-6876e9bea4c0
 https://github.com/servian/aws-step-function-example/blob/master/state-machine
+
+### Mind Map
+
+https://www.mindmeister.com/1379106663/aws-stepfunctions
 
 ### State Machine - High Level Concepts
 - Lambda functions are a great way to create serverless architectures within AWS. But managing and orchestrating them can be difficult when we use many functions within a pipeline. 
