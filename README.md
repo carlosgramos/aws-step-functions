@@ -6,15 +6,15 @@ https://docs.aws.amazon.com/step-functions/latest/dg/concepts-activities.html
 https://medium.com/weareservian/serverless-data-processing-with-aws-step-functions-an-example-6876e9bea4c0
 https://github.com/servian/aws-step-function-example/blob/master/state-machine
 - Lambda functions are a great way to create serverless architectures within AWS. But managing and orchestrating them can be difficult when we use many functions within a pipeline. 
-Managing long-running asynchronous processes is also a problem. Lambda can trigger processes to start, but we should avoid having them wait for long-running processes (more than a few minutes) to conclude. 
-AWS Step Functions is a solution to both these problems.
-StepFunctions are also known as "state machines."
-The state machine requires an IAM role to launch Lambda functions.
-After you create a state machine, you can start an execution. 
-State machines are defined using JSON text that represents a structure containing the following fields.
-Comment (Optional)
+- Managing long-running asynchronous processes is also a problem. Lambda can trigger processes to start, but we should avoid having them wait for long-running processes (more than a few minutes) to conclude. 
+- AWS Step Functions is a solution to both these problems.
+- StepFunctions are also known as "state machines."
+- The state machine requires an IAM role to launch Lambda functions.
+- After you create a state machine, you can start an execution. 
+- State machines are defined using JSON text that represents a structure containing the following fields.
+- Comment (Optional)
 A human-readable description of the state machine.
-StartAt (Required)
+- StartAt (Required)
 A string that must exactly match (is case sensitive) the name of one of the state objects.
 TimeoutSeconds (Optional)
 The maximum number of seconds an execution of the state machine can run. If it runs longer than the specified time, the execution fails with a States.Timeout Error Name.
