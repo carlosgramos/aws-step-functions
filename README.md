@@ -98,3 +98,7 @@ https://www.mindmeister.com/1379106663/aws-stepfunctions
 - The first example is based on a Linux Academy Lab:
 
 "Our company records its meetings and wants to build an automated pipeline to process meeting audio files. They use Amazon Transcribe, and want to trigger an action after the transcription is complete. But Amazon Transcribe is asynchronous, so we need to find a way to monitor the transcription job, so we can trigger a future action. We use step functions to solve it."
+
+- The second example is based on a Linux Academy Lab:
+
+"We work for a company that holds meetings in English, with a management team that speaks Spanish. The management team wants an automated system that processes recordings of English meetings and translates them into Spanish. At the same time, the system should let the team know if the sentiment of the meeting was positive, negative, or neutral."
