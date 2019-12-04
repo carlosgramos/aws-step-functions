@@ -1,9 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
 
 Resources:
-  InputBucket:
+  rInputBucket:
     Type: AWS::S3::Bucket
-    DependsOn: InputBucketPermission
+    DependsOn: rInputBucketPermission
     Properties:
       BucketName:
         Fn::Join:
@@ -19,18 +19,18 @@ Resources:
         - Event: s3:ObjectCreated:*
           Function:
             Fn::GetAtt:
-            - TriggerAiLambda
+            - rTriggerAiLambda
             - Arn
-  InputBucketPermission:
+  rInputBucketPermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
       FunctionName:
-        Ref: TriggerAiLambda
+        Ref: rTriggerAiLambda
       Principal: s3.amazonaws.com
       SourceAccount:
         Ref: AWS::AccountId
-  OutputBucket:
+  rOutputBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName:
@@ -42,13 +42,13 @@ Resources:
             - Fn::Split:
               - "/"
               - Ref: AWS::StackId
-  LambdaExecutionRole:
+  rLambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName:
         Fn::Join:
         - ''
-        - - lab-role-lambda-
+        - - lab-2-role-lambda-
           - Ref: AWS::Region
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -77,7 +77,7 @@ Resources:
             Action:
             - states:StartExecution
             Resource:
-              Ref: StateMachine
+              Ref: rStateMachine
           - Effect: Allow
             Action:
             - transcribe:StartTranscriptionJob
@@ -95,13 +95,13 @@ Resources:
             Action:
             - polly:StartSpeechSynthesisTask
             Resource: "*"
-  StateMachineExecutionRole:
+  rStateMachineExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName:
         Fn::Join:
         - ''
-        - - lab-role-step-function-
+        - - lab-2-role-step-function-
           - Ref: AWS::Region
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -122,243 +122,382 @@ Resources:
             Action:
             - lambda:InvokeFunction
             Resource: "*"
-  TriggerAiLambda:
+  rTriggerAiLambda:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: lab-trigger-ai-pipeline
       Handler: index.lambda_handler
       Role:
         Fn::GetAtt:
-        - LambdaExecutionRole
+        - rLambdaExecutionRole
         - Arn
       Code:
         ZipFile:
-          Fn::Sub: "import boto3\nimport os\nimport json\n\nstepfunctions = boto3.client('stepfunctions')\n\ndef
-            lambda_handler(event, context):\n    \n    bucket = event['Records'][0]['s3']['bucket']['name']\n
-            \   key = event['Records'][0]['s3']['object']['key']\n    \n    input
-            = {\n        \"Bucket\" : bucket,\n        \"Key\": key\n    }\n    \n
-            \   response = stepfunctions.start_execution(\n        stateMachineArn=os.environ['STATEMACHINEARN'],\n
-            \       input=json.dumps(input)\n    )\n    \n    return json.dumps(response,
-            default=str)\n"
+          Fn::Sub: |
+            import boto3
+            import os
+            import json
+            
+            stepfunctions = boto3.client('stepfunctions')
+            
+            def lambda_handler(event, context):
+                
+              bucket = event['Records'][0]['s3']['bucket']['name']
+              key = event['Records'][0]['s3']['object']['key']
+              
+              input = {
+                "Bucket" : bucket,
+                "Key": key
+              }
+              
+              response = stepfunctions.start_execution(
+                  stateMachineArn=os.environ['STATE_MACHINE_ARN'],
+                  input=json.dumps(input)
+              )
+              
+              return json.dumps(response, default=str)
       Runtime: python3.6
       Environment:
         Variables:
-          STATEMACHINEARN:
-            Ref: StateMachine
+          STATE_MACHINE_ARN:
+            Ref: rStateMachine
       Timeout: 300
-  TranscribeWrapperLambda:
+  rTranscribeWrapperLambda:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: lab-transcribe-wrapper
       Handler: index.lambda_handler
       Role:
         Fn::GetAtt:
-        - LambdaExecutionRole
+        - rLambdaExecutionRole
         - Arn
       Code:
         ZipFile:
-          Fn::Sub: "import boto3\nimport os\nimport uuid\n\ntranscribe = boto3.client('transcribe')\n\ndef
-            lambda_handler(event, context):\n    \n    input = event['Input']\n    s3Path
-            = \"s3://\" + input['Bucket'] + \"/\" + input['Key']\n    jobName = input['Key']
-            + '-' + str(uuid.uuid4())\n    \n    response = transcribe.start_transcription_job(\n
-            \       TranscriptionJobName=jobName,\n        LanguageCode=os.environ['LANGUAGECODE'],\n
-            \       MediaFormat='mp4',\n        Media={\n            'MediaFileUri':
-            s3Path\n        },\n        Settings={\n            'ShowSpeakerLabels':
-            False,\n            'ChannelIdentification': False\n        }\n    )\n
-            \   \n    print(response)\n    \n    return {\n        'TranscriptionJobName':
-            response['TranscriptionJob']['TranscriptionJobName']\n    }\n"
+          Fn::Sub: |
+            import boto3
+            import os
+            import uuid
+            
+            transcribe = boto3.client('transcribe')
+            
+            def lambda_handler(event, context):
+      
+                input = event['Input']
+                s3Path = "s3://" + input['Bucket'] + "/" + input['Key']
+                jobName = input['Key'] + '-' + str(uuid.uuid4())
+                
+                response = transcribe.start_transcription_job(
+                    TranscriptionJobName=jobName,
+                    LanguageCode=os.environ['LANGUAGECODE'],
+                    MediaFormat='mp4',
+                    Media={
+                        'MediaFileUri': s3Path
+                    },
+                    Settings={
+                        'ShowSpeakerLabels': False,
+                        'ChannelIdentification': False
+                    }
+                )
+                
+                return {
+                    'TranscriptionJobName': response['TranscriptionJob']['TranscriptionJobName']
+                }
       Runtime: python3.6
       Environment:
         Variables:
           LANGUAGECODE: en-US
       Timeout: 300
-  TranscribeCheckerWrapperLambda:
+  rTranscribeCheckerWrapperLambda:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: lab-transcribe-status-checker
       Handler: index.lambda_handler
       Role:
         Fn::GetAtt:
-        - LambdaExecutionRole
+        - rLambdaExecutionRole
         - Arn
       Code:
         ZipFile:
-          Fn::Sub: "import boto3\n\ntranscribe = boto3.client('transcribe')\n\ndef
-            lambda_handler(event, context):\n    \n    payload = event['Input']['Payload']\n
-            \   transcriptionJobName = payload['TranscriptionJobName']\n    \n    response
-            = transcribe.get_transcription_job(\n        TranscriptionJobName=transcriptionJobName\n
-            \   )\n    \n    transcriptionJob = response['TranscriptionJob']\n    \n
-            \   transcriptFileUri = \"none\"\n    if 'Transcript' in transcriptionJob:\n
-            \       if 'TranscriptFileUri' in transcriptionJob['Transcript']:\n            transcriptFileUri
-            = transcriptionJob['Transcript']['TranscriptFileUri']\n    \n    return
-            {\n        'TranscriptFileUri': transcriptFileUri,\n        'TranscriptionJobName':
-            transcriptionJobName,\n        'TranscriptionJobStatus': response['TranscriptionJob']['TranscriptionJobStatus']\n
-            \   }\n"
+          Fn::Sub: |
+            import boto3
+            
+            transcribe = boto3.client('transcribe')
+
+            def lambda_handler(event, context):
+                
+              payload = event['Input']['Payload']
+          
+              transcriptionJobName = payload['TranscriptionJobName']
+              
+              response = transcribe.get_transcription_job(
+                  TranscriptionJobName=transcriptionJobName
+              )
+              
+              transcriptionJob = response['TranscriptionJob']
+              
+              transcriptFileUri = "none"
+              if 'Transcript' in transcriptionJob:
+                if 'TranscriptFileUri' in transcriptionJob['Transcript']:
+                  transcriptFileUri = transcriptionJob['Transcript']['TranscriptFileUri']
+                  
+              return {
+                        'TranscriptFileUri': transcriptFileUri,
+                        'TranscriptionJobName': transcriptionJobName,
+                        'TranscriptionJobStatus': response['TranscriptionJob']['TranscriptionJobStatus']
+                      }
       Runtime: python3.6
       Timeout: 300
-  ComprehendWrapperLambda:
+  rComprehendWrapperLambda:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: lab-comprehend-wrapper
       Handler: index.lambda_handler
       Role:
         Fn::GetAtt:
-        - LambdaExecutionRole
+        - rLambdaExecutionRole
         - Arn
       Code:
         ZipFile:
-          Fn::Sub: "import boto3\nimport json\nimport urllib.request\n\ncomprehend
-            = boto3.client('comprehend')\n\ndef lambda_handler(event, context):\n\n
-            \   payload = event['Input']['Payload']\n    transcriptFileUri = payload['TranscriptFileUri']\n
-            \   transcriptionJobName = payload['TranscriptionJobName']\n\n    transcriptFile
-            = urllib.request.urlopen(transcriptFileUri)\n    transcript = transcriptFile.read()\n
-            \   transcript = json.loads(transcript)\n    transcript_text = transcript['results']['transcripts'][0]['transcript']\n
-            \   \n    response = comprehend.detect_sentiment(\n        Text=transcript_text,\n
-            \       LanguageCode='en'\n    )\n\n    sentiment = response['Sentiment']\n\n
-            \   return {\n        'Sentiment': sentiment,\n        'TranscriptionJobName':
-            transcriptionJobName\n    }\n    \n"
+          Fn::Sub: |
+            import boto3
+            import json
+            import urllib.request
+            
+            comprehend = boto3.client('comprehend')
+            
+            def lambda_handler(event, context):
+              payload = event['Input']['Payload']
+              transcriptFileUri = payload['TranscriptFileUri']
+            
+              transcriptionJobName = payload['TranscriptionJobName']
+            
+              transcriptFile = urllib.request.urlopen(transcriptFileUri)
+              transcript = transcriptFile.read()
+            
+              transcript = json.loads(transcript)
+              transcript_text = transcript['results']['transcripts'][0]['transcript']
+                           
+              response = comprehend.detect_sentiment(
+                  Text=transcript_text,
+                  LanguageCode='en'
+              )
+            
+              sentiment = response['Sentiment']
+            
+              return {
+                      'Sentiment': sentiment,
+                      'TranscriptionJobName': transcriptionJobName
+                      }
       Runtime: python3.6
       Timeout: 300
-  TranslateWrapperLambda:
+  rTranslateWrapperLambda:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: lab-translate-wrapper
       Handler: index.lambda_handler
       Role:
         Fn::GetAtt:
-        - LambdaExecutionRole
+        - rLambdaExecutionRole
         - Arn
       Code:
         ZipFile:
-          Fn::Sub: "import boto3\nimport json\nimport os\nimport urllib.request\n\ntranslate
-            = boto3.client('translate')\n\ndef lambda_handler(event, context):\n\n
-            \   payload = event['Input']['Payload']\n    transcriptFileUri = payload['TranscriptFileUri']\n
-            \   transcriptionJobName = payload['TranscriptionJobName']\n\n    transcriptFile
-            = urllib.request.urlopen(transcriptFileUri)\n    transcript = transcriptFile.read()\n
-            \   transcript = json.loads(transcript)\n    transcript_text = transcript['results']['transcripts'][0]['transcript']\n\n
-            \   response = translate.translate_text(\n        Text=transcript_text,\n
-            \       SourceLanguageCode=os.environ['SOURCELANGUAGECODE'],\n        TargetLanguageCode=os.environ['TARGETLANGUAGECODE']\n
-            \   )\n\n    return {\n        'TranslatedText': response['TranslatedText'],\n
-            \       'TranscriptionJobName': transcriptionJobName,\n    }\n    \n"
+          Fn::Sub: |
+            import boto3
+            import json
+            import os
+            import urllib.request
+            
+            translate = boto3.client('translate')
+            
+            def lambda_handler(event, context):
+              payload = event['Input']['Payload']
+              transcriptFileUri = payload['TranscriptFileUri']
+          
+              transcriptionJobName = payload['TranscriptionJobName']
+          
+              transcriptFile = urllib.request.urlopen(transcriptFileUri)
+              transcript = transcriptFile.read()
+          
+              transcript = json.loads(transcript)
+              transcript_text = transcript['results']['transcripts'][0]['transcript']
+          
+          
+              response = translate.translate_text(
+                  Text=transcript_text,
+                  SourceLanguageCode=os.environ['SOURCELANGUAGECODE'],
+                  TargetLanguageCode=os.environ['TARGETLANGUAGECODE']
+              )
+          
+              return {
+                  'TranslatedText': response['TranslatedText'],
+                  'TranscriptionJobName': transcriptionJobName,
+              }
       Runtime: python3.6
       Environment:
         Variables:
           SOURCELANGUAGECODE: en
           TARGETLANGUAGECODE: es
       Timeout: 300
-  PollyWrapperLambda:
+  rPollyWrapperLambda:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: lab-polly-wrapper
       Handler: index.lambda_handler
       Role:
         Fn::GetAtt:
-        - LambdaExecutionRole
+        - rLambdaExecutionRole
         - Arn
       Code:
         ZipFile:
-          Fn::Sub: "# https://docs.aws.amazon.com/polly/latest/dg/voicelist.html\nimport
-            boto3\nimport os\n\npolly = boto3.client('polly')\n\ndef lambda_handler(event,
-            context):\n  \n    payload = event['Input'][0]['Payload']\n    payload_other
-            = event['Input'][1]['Payload']\n    \n    payload.update(payload_other)\n
-            \   \n    translatedText = payload['TranslatedText']\n    transcriptionJobName
-            = payload['TranscriptionJobName']\n    sentiment = payload['Sentiment']\n\n
-            \   response = polly.start_speech_synthesis_task(\n        LanguageCode=os.environ['LANGUAGECODE'],\n
-            \       OutputFormat='mp3',\n        OutputS3BucketName=os.environ['OUTPUTS3BUCKETNAME'],\n
-            \       OutputS3KeyPrefix=sentiment + \"/\" + transcriptionJobName + \"-\"
-            + sentiment,\n        Text=translatedText,\n        TextType='text',\n
-            \       VoiceId=os.environ['VOICEID']\n    )\n\n    return {\n        'TaskId':
-            response['SynthesisTask']['TaskId'],\n        'TranscriptionJobName':
-            transcriptionJobName\n    }\n"
+          Fn::Sub: |
+            # https://docs.aws.amazon.com/polly/latest/dg/voicelist.html
+            import
+            boto3
+            import os
+            
+            polly = boto3.client('polly')
+            
+            def lambda_handler(event, context):
+              
+              payload = event['Input'][0]['Payload']
+              payload_other = event['Input'][1]['Payload']
+              
+              payload.update(payload_other)
+          
+              translatedText = payload['TranslatedText']
+              transcriptionJobName = payload['TranscriptionJobName']
+              sentiment = payload['Sentiment']
+          
+              response = polly.start_speech_synthesis_task(
+                  LanguageCode=os.environ['LANGUAGECODE'],
+                  OutputFormat='mp3',
+                  OutputS3BucketName=os.environ['OUTPUTS3BUCKETNAME'],
+                  OutputS3KeyPrefix=sentiment + "/" + transcriptionJobName + "-" + sentiment,
+                  Text=translatedText,
+                  TextType='text',
+                  VoiceId=os.environ['VOICEID']
+              )
+          
+              return {
+                  'TaskId': response['SynthesisTask']['TaskId'],
+                  'TranscriptionJobName': transcriptionJobName
+              }
       Runtime: python3.6
       Environment:
         Variables:
           LANGUAGECODE: es-ES
           OUTPUTS3BUCKETNAME:
-            Ref: OutputBucket
+            Ref: rOutputBucket
           VOICEID: Lucia
       Timeout: 300
-  StateMachine:
+  rStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
-      StateMachineName: lab-step-functions
+      StateMachineName: parallel-task-state-machine
       DefinitionString:
-        Fn::Sub: "{\n  \"StartAt\":\"transcribe\",\n  \"States\":{\n    \"transcribe\":{\n
-          \     \"Type\":\"Task\",\n      \"Resource\":\"arn:aws:states:::lambda:invoke\",\n
-          \     \"Parameters\":{\n          \"FunctionName\":\"arn:aws:lambda:us-east-1:${AWS::AccountId}:function:lab-transcribe-wrapper:$LATEST\",\n
-          \         \"Payload\":{\n            \"Input.$\":\"$\"\n          }\n      },\n
-          \     \"Next\":\"transcribe-wait\"\n    },\n    \"transcribe-wait\":{\n
-          \       \"Type\":\"Wait\",\n        \"Seconds\":2,\n        \"Next\":\"transcribe-status\"\n
-          \   },\n    \"transcribe-status\": {\n      \"Type\":\"Task\",\n      \"Resource\":\"arn:aws:states:::lambda:invoke\",\n
-          \     \"Parameters\":{\n          \"FunctionName\":\"arn:aws:lambda:us-east-1:${AWS::AccountId}:function:lab-transcribe-status-checker:$LATEST\",\n
-          \         \"Payload\":{\n            \"Input.$\":\"$\"\n          }\n      },\n
-          \       \"Next\": \"transcribe-complete\"\n    },\n    \"transcribe-complete\":{\n
-          \       \"Type\":\"Choice\",\n        \"Choices\":[\n            {\n                \"Variable\":\"$.Payload.TranscriptionJobStatus\",\n
-          \               \"StringEquals\":\"COMPLETED\",\n                \"Next\":\"success\"\n
-          \           },\n            {\n                \"Variable\":\"$.Payload.TranscriptionJobStatus\",\n
-          \               \"StringEquals\":\"FAILED\",\n                \"Next\":\"error\"\n
-          \           }\n        ],\n        \"Default\":\"transcribe-wait\"  \n    },\n
-          \   \"success\": {\n        \"Type\": \"Pass\",\n        \"End\": true\n
-          \   },\n    \"error\": {\n        \"Type\": \"Pass\",\n        \"End\":
-          true\n    }\n  }\n}\n"
+        Fn::Sub: |
+          {
+            "StartAt":"transcribe",
+            "States":{
+              "transcribe":{
+                "Type":"Task",
+                "Resource":"arn:aws:states:::lambda:invoke",
+                "Parameters":{
+                    "FunctionName":"arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:lab-transcribe-wrapper:$LATEST",
+                    "Payload":{
+                      "Input.$":"$"
+                    }
+                },
+                "Next":"transcribe-wait"
+              },
+              "transcribe-wait":{
+                "Type":"Wait",
+                "Seconds":2,
+                "Next":"transcribe-status"
+              },
+              "transcribe-status": {
+                "Type":"Task",
+                "Resource":"arn:aws:states:::lambda:invoke",
+                "Parameters":{
+                  "FunctionName":"arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:lab-transcribe-status-checker:$LATEST",
+                    "Payload":{
+                      "Input.$":"$"
+                    }
+                },
+                "Next": "transcribe-complete"
+              },
+              "transcribe-complete":{
+                "Type":"Choice",
+                "Choices":[
+                    {
+                      "Variable":"$.Payload.TranscriptionJobStatus",
+                      "StringEquals":"COMPLETED",
+                      "Next":"success"
+                    },
+                    {
+                      "Variable":"$.Payload.TranscriptionJobStatus",
+                      "StringEquals":"FAILED",
+                      "Next":"error"
+                    }
+                ],
+                "Default":"transcribe-wait"  
+              },
+              "process-transcript":{
+                "Type":"Parallel",
+                "Branches":[
+                  {
+                      "StartAt":"comprehend",
+                      "States":{
+                          "comprehend": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::lambda:invoke",
+                            "Parameters": {
+                              "FunctionName": "arn:aws:lambda:${AWS::Region}:${AWS:AccountId}:function:lab-comprehend-wrapper:$LATEST",
+                              "Payload": {
+                                "Input.$": "$"
+                              }
+                            },
+                            "End": True
+                          }
+                      }
+                  },
+                  {
+                      "StartAt":"translate",
+                      "States":{
+                        "translate": {
+                          "Type": "Task",
+                          "Resource": "arn:aws:states:::lambda:invoke",
+                          "Parameters": {
+                            "FunctionName": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:lab-translate-wrapper:$LATEST",
+                            "Payload": {
+                              "Input.$": "$"
+                            }
+                          },
+                          "End": true
+                        }
+                      }
+                  }
+                ],
+                "Next":"polly"
+              },
+              "polly":{
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "arn:aws:lambda:us-east-1:515182405569:function:lab-polly-wrapper:$LATEST",
+                  "Payload": {
+                    "Input.$": "$"
+                  }
+                },
+                "End": true  
+              },
+              "error": {
+                "Type": "Pass",
+                "End": true
+              }
+            }
+          }
       RoleArn:
         Fn::GetAtt:
-        - StateMachineExecutionRole
+        - rStateMachineExecutionRole
         - Arn
-
-# {
-#   "StartAt":"transcribe",
-#   "States":{
-#     "transcribe":{
-#       "Type":"Task",
-#       "Resource":"arn:aws:states:::lambda:invoke",
-#       "Parameters":{
-#           "FunctionName":"arn:aws:lambda:us-east-1:${AWS::AccountId}:function:lab-transcribe-wrapper:$LATEST",
-#           "Payload":{
-#             "Input.$":"$"
-#           }
-#       },
-#       "Next":"transcribe-wait"
-#     },
-#     "transcribe-wait":{
-#         "Type":"Wait",
-#         "Seconds":2,
-#         "Next":"transcribe-status"
-#     },
-#     "transcribe-status": {
-#       "Type":"Task",
-#       "Resource":"arn:aws:states:::lambda:invoke",
-#       "Parameters":{
-#         "FunctionName":"arn:aws:lambda:us-east-1:${AWS::AccountId}:function:lab-transcribe-status-checker:$LATEST",
-#           "Payload":{
-#             "Input.$":"$"
-#           }
-#       },
-#       "Next": "transcribe-complete"
-#     },
-#     "transcribe-complete":{
-#         "Type":"Choice",
-#         "Choices":[
-#             {
-#               "Variable":"$.Payload.TranscriptionJobStatus",
-#               "StringEquals":"COMPLETED",
-#               "Next":"success"
-#             },
-#             {
-#               "Variable":"$.Payload.TranscriptionJobStatus",
-#               "StringEquals":"FAILED",
-#               "Next":"error"
-#             }
-#         ],
-#         "Default":"transcribe-wait"  
-#     },
-#     "success": {
-#         "Type": "Pass",
-#         "End": true
-#     },
-#     "error": {
-#         "Type": "Pass",
-#         "End": true
-#     }
-#   }
-# }
