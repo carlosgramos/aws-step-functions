@@ -429,53 +429,53 @@ Resources:
               "transcribe-complete":{
                 "Type":"Choice",
                 "Choices":[
-                    {
-                      "Variable":"$.Payload.TranscriptionJobStatus",
-                      "StringEquals":"COMPLETED",
-                      "Next":"success"
-                    },
-                    {
-                      "Variable":"$.Payload.TranscriptionJobStatus",
-                      "StringEquals":"FAILED",
-                      "Next":"error"
-                    }
-                ],
+                  {
+                    "Variable":"$.Payload.TranscriptionJobStatus",
+                    "StringEquals":"COMPLETED",
+                    "Next":"process-transcript"
+                  },
+                  {
+                    "Variable":"$.Payload.TranscriptionJobStatus",
+                    "StringEquals":"FAILED",
+                    "Next":"error"
+                  }
+              ],
                 "Default":"transcribe-wait"  
               },
               "process-transcript":{
                 "Type":"Parallel",
                 "Branches":[
                   {
-                      "StartAt":"comprehend",
-                      "States":{
-                          "comprehend": {
-                            "Type": "Task",
-                            "Resource": "arn:aws:states:::lambda:invoke",
-                            "Parameters": {
-                              "FunctionName": "arn:aws:lambda:${AWS::Region}:${AWS:AccountId}:function:lab-comprehend-wrapper:$LATEST",
-                              "Payload": {
-                                "Input.$": "$"
-                              }
-                            },
-                            "End": True
-                          }
-                      }
-                  },
-                  {
-                      "StartAt":"translate",
-                      "States":{
-                        "translate": {
+                    "StartAt":"comprehend",
+                    "States":{
+                        "comprehend": {
                           "Type": "Task",
                           "Resource": "arn:aws:states:::lambda:invoke",
                           "Parameters": {
-                            "FunctionName": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:lab-translate-wrapper:$LATEST",
+                            "FunctionName": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:lab-comprehend-wrapper:$LATEST",
                             "Payload": {
                               "Input.$": "$"
                             }
                           },
                           "End": true
                         }
+                    }
+                  },
+                  {
+                    "StartAt":"translate",
+                    "States":{
+                      "translate": {
+                        "Type": "Task",
+                        "Resource": "arn:aws:states:::lambda:invoke",
+                        "Parameters": {
+                          "FunctionName": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:lab-translate-wrapper:$LATEST",
+                          "Payload": {
+                            "Input.$": "$"
+                          }
+                        },
+                        "End": true
                       }
+                    }
                   }
                 ],
                 "Next":"polly"
